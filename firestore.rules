@@ -1,0 +1,333 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/user_roles/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/user_roles/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    function validListingType(value) {
+      return value in ['for_sale', 'for_rent'];
+    }
+
+    function validUserPropertyData(data) {
+      return
+        data.keys().hasOnly([
+          'id',
+          'slug',
+          'ownerId',
+          'ownerName',
+          'ownerEmail',
+          'ownerPhotoUrl',
+          'title',
+          'location',
+          'listingStatus',
+          'propertyType',
+          'price',
+          'bedrooms',
+          'bathrooms',
+          'area',
+          'garage',
+          'images',
+          'description',
+          'features',
+          'phone',
+          'status',
+          'wpPostId',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.id is int &&
+        data.slug is string &&
+        data.ownerId is string &&
+        data.ownerName is string &&
+        data.ownerEmail is string &&
+        data.ownerPhotoUrl is string &&
+        data.title is string &&
+        data.location is string &&
+        validListingType(data.listingStatus) &&
+        data.propertyType is string &&
+        data.price is number &&
+        data.bedrooms is number &&
+        data.bathrooms is number &&
+        data.area is number &&
+        data.garage is number &&
+        data.images is list &&
+        data.images.size() <= 3 &&
+        data.description is string &&
+        data.features is list &&
+        data.phone is string &&
+        data.status == 'active' &&
+        data.wpPostId is number;
+    }
+
+    match /wishlists/{userId}/items/{itemId} {
+      allow read, delete: if isOwner(userId);
+      allow create, update: if
+        isOwner(userId) &&
+        request.resource.data.keys().hasOnly(['propertyId', 'createdAt']) &&
+        request.resource.data.propertyId is int &&
+        request.resource.data.propertyId == int(itemId);
+    }
+
+    match /seller_leads/{leadId} {
+      allow create: if
+        isSignedIn() &&
+        request.resource.data.keys().hasOnly([
+          'userId',
+          'fullName',
+          'email',
+          'phone',
+          'address',
+          'propertyType',
+          'estimatedPrice',
+          'message',
+          'status',
+          'createdAt'
+        ]) &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.fullName is string &&
+        request.resource.data.email is string &&
+        request.resource.data.phone is string &&
+        request.resource.data.address is string &&
+        request.resource.data.propertyType is string &&
+        request.resource.data.estimatedPrice is string &&
+        request.resource.data.message is string &&
+        request.resource.data.status == 'new';
+
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    match /user_roles/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create, update: if isAdmin() &&
+        request.resource.data.keys().hasOnly(['role', 'updatedAt']) &&
+        request.resource.data.role in ['user', 'buyer', 'seller', 'admin'];
+    }
+
+    match /listing_flags/{flagId} {
+      allow create: if isSignedIn() &&
+        request.resource.data.keys().hasOnly([
+          'listingId',
+          'listingSlug',
+          'reason',
+          'details',
+          'status',
+          'reporterId',
+          'createdAt'
+        ]) &&
+        request.resource.data.listingId is string &&
+        request.resource.data.listingSlug is string &&
+        request.resource.data.reason is string &&
+        request.resource.data.details is string &&
+        request.resource.data.status == 'open' &&
+        request.resource.data.reporterId == request.auth.uid;
+      allow read: if isAdmin() || (isSignedIn() && resource.data.reporterId == request.auth.uid);
+      allow update: if isAdmin();
+    }
+
+    match /user_flags/{flagId} {
+      allow create: if isSignedIn() &&
+        request.resource.data.keys().hasOnly([
+          'targetUserId',
+          'reason',
+          'details',
+          'status',
+          'reporterId',
+          'createdAt'
+        ]) &&
+        request.resource.data.targetUserId is string &&
+        request.resource.data.reason is string &&
+        request.resource.data.details is string &&
+        request.resource.data.status == 'open' &&
+        request.resource.data.reporterId == request.auth.uid;
+      allow read: if isAdmin() || (isSignedIn() && resource.data.reporterId == request.auth.uid);
+      allow update: if isAdmin();
+    }
+
+    match /listing_audits/{auditId} {
+      allow read: if isAdmin();
+      allow create, update: if isAdmin() &&
+        request.resource.data.keys().hasOnly([
+          'listingId',
+          'listingSlug',
+          'result',
+          'note',
+          'updatedAt',
+          'updatedBy'
+        ]) &&
+        request.resource.data.listingId is string &&
+        request.resource.data.listingSlug is string &&
+        request.resource.data.result in ['pass', 'warning', 'fail'] &&
+        request.resource.data.note is string &&
+        request.resource.data.updatedBy == request.auth.uid;
+    }
+
+    match /support_tickets/{ticketId} {
+      allow create: if isSignedIn() &&
+        request.resource.data.keys().hasOnly([
+          'subject',
+          'message',
+          'status',
+          'createdBy',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        request.resource.data.subject is string &&
+        request.resource.data.message is string &&
+        request.resource.data.status == 'open' &&
+        request.resource.data.createdBy == request.auth.uid;
+      allow read: if isAdmin() || (isSignedIn() && resource.data.createdBy == request.auth.uid);
+      allow update: if isAdmin();
+    }
+
+    match /user_properties/{propertyId} {
+      allow read: if true;
+
+      allow create: if
+        isSignedIn() &&
+        request.resource.data.ownerId == request.auth.uid &&
+        validUserPropertyData(request.resource.data);
+
+      allow update: if
+        isSignedIn() &&
+        resource.data.ownerId == request.auth.uid &&
+        request.resource.data.ownerId == resource.data.ownerId &&
+        request.resource.data.id == resource.data.id &&
+        request.resource.data.slug == resource.data.slug &&
+        validUserPropertyData(request.resource.data);
+
+      allow delete: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+    }
+
+    match /listing_threads/{threadId} {
+      allow create: if
+        isSignedIn() &&
+        request.resource.data.keys().hasOnly([
+          'propertySlug',
+          'propertyTitle',
+          'ownerId',
+          'ownerName',
+          'ownerPhotoUrl',
+          'customerId',
+          'customerName',
+          'customerPhotoUrl',
+          'customerEmail',
+          'customerPhone',
+          'lastMessageText',
+          'lastMessageAt',
+          'unreadForOwner',
+          'unreadForCustomer',
+          'createdAt'
+        ]) &&
+        request.resource.data.ownerId is string &&
+        request.resource.data.ownerName is string &&
+        request.resource.data.ownerPhotoUrl is string &&
+        request.resource.data.customerId == request.auth.uid &&
+        request.resource.data.propertySlug is string &&
+        request.resource.data.propertyTitle is string &&
+        request.resource.data.customerName is string &&
+        request.resource.data.customerPhotoUrl is string &&
+        request.resource.data.customerEmail is string &&
+        request.resource.data.customerPhone is string &&
+        request.resource.data.lastMessageText is string &&
+        request.resource.data.unreadForOwner is int &&
+        request.resource.data.unreadForCustomer is int &&
+        request.resource.data.unreadForOwner == 1 &&
+        request.resource.data.unreadForCustomer == 0;
+
+      allow read: if
+        isSignedIn() &&
+        (resource.data.ownerId == request.auth.uid ||
+          resource.data.customerId == request.auth.uid);
+
+      allow update: if
+        isSignedIn() &&
+        (resource.data.ownerId == request.auth.uid ||
+          resource.data.customerId == request.auth.uid) &&
+        request.resource.data.diff(resource.data).changedKeys().hasOnly([
+          'lastMessageText',
+          'lastMessageAt',
+          'unreadForOwner',
+          'unreadForCustomer'
+        ]) &&
+        (!('unreadForOwner' in request.resource.data) ||
+          (request.resource.data.unreadForOwner is int &&
+            request.resource.data.unreadForOwner >= 0 &&
+            request.resource.data.unreadForOwner <= 500)) &&
+        (!('unreadForCustomer' in request.resource.data) ||
+          (request.resource.data.unreadForCustomer is int &&
+            request.resource.data.unreadForCustomer >= 0 &&
+            request.resource.data.unreadForCustomer <= 500));
+
+      match /messages/{messageId} {
+        allow read: if
+          isSignedIn() &&
+          (get(/databases/$(database)/documents/listing_threads/$(threadId)).data.ownerId == request.auth.uid ||
+            get(/databases/$(database)/documents/listing_threads/$(threadId)).data.customerId == request.auth.uid);
+
+        allow create: if
+          isSignedIn() &&
+          request.resource.data.keys().hasOnly([
+            'senderId',
+            'senderName',
+            'senderPhotoUrl',
+            'senderRole',
+            'text',
+            'createdAt'
+          ]) &&
+          request.resource.data.senderId == request.auth.uid &&
+          request.resource.data.senderName is string &&
+          request.resource.data.senderPhotoUrl is string &&
+          request.resource.data.text is string &&
+          request.resource.data.senderRole in ['owner', 'customer'] &&
+          (
+            (
+              get(/databases/$(database)/documents/listing_threads/$(threadId)).data.ownerId ==
+                request.auth.uid &&
+              request.resource.data.senderRole == 'owner'
+            ) ||
+            (
+              get(/databases/$(database)/documents/listing_threads/$(threadId)).data.customerId ==
+                request.auth.uid &&
+              request.resource.data.senderRole == 'customer'
+            )
+          );
+      }
+
+      match /typing/{userId} {
+        allow read: if
+          isSignedIn() &&
+          (get(/databases/$(database)/documents/listing_threads/$(threadId)).data.ownerId == request.auth.uid ||
+            get(/databases/$(database)/documents/listing_threads/$(threadId)).data.customerId == request.auth.uid);
+
+        allow create, update: if
+          isSignedIn() &&
+          userId == request.auth.uid &&
+          (
+            get(/databases/$(database)/documents/listing_threads/$(threadId)).data.ownerId == request.auth.uid ||
+            get(/databases/$(database)/documents/listing_threads/$(threadId)).data.customerId == request.auth.uid
+          ) &&
+          request.resource.data.keys().hasOnly(['isTyping', 'updatedAt']) &&
+          request.resource.data.isTyping is bool;
+
+        allow delete: if
+          isSignedIn() &&
+          userId == request.auth.uid &&
+          (
+            get(/databases/$(database)/documents/listing_threads/$(threadId)).data.ownerId == request.auth.uid ||
+            get(/databases/$(database)/documents/listing_threads/$(threadId)).data.customerId == request.auth.uid
+          );
+      }
+    }
+  }
+}
