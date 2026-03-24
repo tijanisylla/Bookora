@@ -87,11 +87,46 @@ async function fetchPropertiesFromApi(): Promise<Property[]> {
   if (!res.ok) throw new Error(`Failed to load properties: ${res.status}`);
   const data: unknown = await res.json();
   if (!Array.isArray(data)) return [];
+  const mediaIdSet = new Set<number>();
+  data.forEach((raw) => {
+    const acf = (raw as WpPropertyRestResponse).acf;
+    [acf?.image_1, acf?.image_2, acf?.image_3].forEach((v) => {
+      if (typeof v === "number" && v > 0) mediaIdSet.add(v);
+    });
+  });
+  const mediaUrlById = await fetchMediaMap(Array.from(mediaIdSet), API_BASE).catch(
+    () => new Map<number, string>()
+  );
   return Promise.all(
     data.map((raw) =>
-      finalizeWpProperty(raw as WpPropertyRestResponse, API_BASE)
+      finalizeWpProperty(raw as WpPropertyRestResponse, API_BASE, mediaUrlById)
     )
   );
+}
+
+async function fetchMediaMap(ids: number[], apiBase: string): Promise<Map<number, string>> {
+  if (ids.length === 0) return new Map();
+  const out = new Map<number, string>();
+  const pageSize = 50;
+  for (let i = 0; i < ids.length; i += pageSize) {
+    const chunk = ids.slice(i, i + pageSize);
+    const params = new URLSearchParams({
+      include: chunk.join(","),
+      per_page: String(chunk.length),
+      _fields: "id,source_url",
+    });
+    const res = await fetch(`${apiBase}/media?${params.toString()}`);
+    if (!res.ok) continue;
+    const data: unknown = await res.json();
+    if (!Array.isArray(data)) continue;
+    data.forEach((item) => {
+      if (!item || typeof item !== "object") return;
+      const id = Number((item as { id?: unknown }).id);
+      const url = String((item as { source_url?: unknown }).source_url ?? "");
+      if (Number.isFinite(id) && url) out.set(id, url);
+    });
+  }
+  return out;
 }
 
 /** Swap implementation: return MOCK_PROPERTIES now, fetch later */

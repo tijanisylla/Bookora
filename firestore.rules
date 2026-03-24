@@ -50,8 +50,8 @@ service cloud.firestore {
         data.slug is string &&
         data.ownerId is string &&
         data.ownerName is string &&
-        data.ownerEmail is string &&
-        data.ownerPhotoUrl is string &&
+        (!('ownerEmail' in data) || data.ownerEmail is string) &&
+        (!('ownerPhotoUrl' in data) || data.ownerPhotoUrl is string) &&
         data.title is string &&
         data.location is string &&
         validListingType(data.listingStatus) &&
@@ -60,14 +60,14 @@ service cloud.firestore {
         data.bedrooms is number &&
         data.bathrooms is number &&
         data.area is number &&
-        data.garage is number &&
+        (!('garage' in data) || data.garage is number) &&
         data.images is list &&
         data.images.size() <= 3 &&
         data.description is string &&
         data.features is list &&
         data.phone is string &&
         data.status == 'active' &&
-        data.wpPostId is number;
+        (!('wpPostId' in data) || data.wpPostId is number);
     }
 
     match /wishlists/{userId}/items/{itemId} {
@@ -301,6 +301,19 @@ service cloud.firestore {
                 request.auth.uid &&
               request.resource.data.senderRole == 'customer'
             )
+          );
+
+        allow update: if
+          isSignedIn() &&
+          request.resource.data.diff(resource.data).changedKeys().hasOnly([
+            'seenAt',
+            'seenBy'
+          ]) &&
+          request.resource.data.seenBy == request.auth.uid &&
+          resource.data.senderId != request.auth.uid &&
+          (
+            get(/databases/$(database)/documents/listing_threads/$(threadId)).data.ownerId == request.auth.uid ||
+            get(/databases/$(database)/documents/listing_threads/$(threadId)).data.customerId == request.auth.uid
           );
       }
 

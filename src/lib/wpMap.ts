@@ -108,14 +108,22 @@ export function mapWpPropertyToProperty(post: WpPropertyRestResponse): Property 
  */
 export async function finalizeWpProperty(
   raw: WpPropertyRestResponse,
-  apiBase: string
+  apiBase: string,
+  mediaUrlById?: Map<number, string>
 ): Promise<Property> {
   const property = mapWpPropertyToProperty(raw);
   const ids = [raw.acf?.image_1, raw.acf?.image_2, raw.acf?.image_3].filter(
     (x): x is number => typeof x === "number" && x > 0
   );
   if (ids.length > 0) {
-    const urls = await fetchMediaSourceUrls(ids, apiBase);
+    const urlsFromMap =
+      mediaUrlById && mediaUrlById.size > 0
+        ? ids.map((id) => mediaUrlById.get(id) ?? "").filter(Boolean)
+        : [];
+    const urls =
+      urlsFromMap.length > 0
+        ? urlsFromMap
+        : await fetchMediaSourceUrls(ids, apiBase);
     if (urls.length > 0) {
       return { ...property, images: urls };
     }

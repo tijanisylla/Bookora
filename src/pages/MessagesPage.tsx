@@ -11,6 +11,7 @@ import {
   serverTimestamp,
   setDoc,
   updateDoc,
+  writeBatch,
   where,
 } from "firebase/firestore";
 import { Link, useNavigate } from "react-router-dom";
@@ -43,6 +44,8 @@ type Msg = {
   senderPhotoUrl: string;
   text: string;
   createdAtMs: number;
+  seenAtMs: number;
+  seenBy: string;
 };
 
 export function MessagesPage() {
@@ -127,6 +130,11 @@ export function MessagesPage() {
             raw && typeof raw === "object" && "toMillis" in raw
               ? Number((raw as { toMillis: () => number }).toMillis())
               : 0;
+          const rawSeen = data.seenAt;
+          const seenAtMs =
+            rawSeen && typeof rawSeen === "object" && "toMillis" in rawSeen
+              ? Number((rawSeen as { toMillis: () => number }).toMillis())
+              : 0;
           return {
             id: d.id,
             senderId: String(data.senderId ?? ""),
@@ -134,12 +142,33 @@ export function MessagesPage() {
             senderPhotoUrl: String(data.senderPhotoUrl ?? ""),
             text: String(data.text ?? ""),
             createdAtMs: Number.isFinite(ms) ? ms : 0,
+            seenAtMs: Number.isFinite(seenAtMs) ? seenAtMs : 0,
+            seenBy: String(data.seenBy ?? ""),
           };
         })
       );
     });
     return () => off();
   }, [selectedThreadId]);
+
+  useEffect(() => {
+    if (!user || !selectedThreadId) return;
+    const thread = threads.find((t) => t.id === selectedThreadId);
+    if (!thread) return;
+    const unseenIncoming = messages.filter(
+      (m) => m.senderId !== user.id && m.seenAtMs <= 0
+    );
+    if (unseenIncoming.length === 0) return;
+    const batch = writeBatch(firestoreDb);
+    unseenIncoming.forEach((m) => {
+      batch.set(
+        doc(firestoreDb, "listing_threads", selectedThreadId, "messages", m.id),
+        { seenAt: serverTimestamp(), seenBy: user.id },
+        { merge: true }
+      );
+    });
+    void batch.commit().catch(() => undefined);
+  }, [user, selectedThreadId, threads, messages]);
 
   useEffect(() => {
     if (!selectedThreadId || !user) {
@@ -368,6 +397,7 @@ export function MessagesPage() {
                           }`}
                         >
                           {formatTime(m.createdAtMs)}
+                          {mine && m.seenBy && m.seenBy !== user?.id ? " • Seen" : ""}
                         </p>
                       </div>
                     );
